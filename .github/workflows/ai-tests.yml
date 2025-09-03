@@ -1,0 +1,33 @@
+name: AI Unit Test Coverage with Ollama
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ai_review:
+    runs-on: self-hosted   # we'll use a local runner
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate Unit Tests with Ollama
+        run: |
+          export BOT=ollama
+          export LLM_URL=http://localhost:11434/api/generate
+          export LLM_MODEL=llama3
+          export SRC_PATH=app.py
+          export TEST_PATH=tests/test_app_generated.py
+          python3 src/github_test_coverage.py
+
+      - name: Run Tests
+        run: pytest tests/
