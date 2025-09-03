@@ -1,33 +1,38 @@
-name: AI Unit Test Coverage with Ollama
+name: AI Test Coverage Pipeline
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
+    branches: ["main"]
   workflow_dispatch:
 
 jobs:
   ai_review:
-    runs-on: self-hosted   # we'll use a local runner
+    runs-on: self-hosted   # because Ollama runs locally
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt || true
+          pip install pytest requests
 
       - name: Generate Unit Tests with Ollama
+        env:
+          BOT: ollama
+          LLM_URL: http://localhost:11434/api/generate
+          LLM_MODEL: llama3
+          SRC_PATH: app.py
+          TEST_PATH: tests/test_app_generated.py
         run: |
-          export BOT=ollama
-          export LLM_URL=http://localhost:11434/api/generate
-          export LLM_MODEL=llama3
-          export SRC_PATH=app.py
-          export TEST_PATH=tests/test_app_generated.py
-          python3 src/github_test_coverage.py
+          python src/github_test_coverage.py
 
-      - name: Run Tests
-        run: pytest tests/
+      - name: Run Pytest
+        run: pytest tests/ --maxfail=1 --disable-warnings -q
