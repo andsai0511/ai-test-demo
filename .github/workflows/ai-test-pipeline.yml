@@ -1,31 +1,74 @@
-# .github/workflows/ai-test-pipeline.yml
 name: AI Test Coverage Pipeline
+
 on:
-  workflow_dispatch:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   ai_review:
+    # Your Windows box
     runs-on: self-hosted
-    labels: [colab]   # <— ensures it lands on your Colab VM
+    timeout-minutes: 30
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show runner info (debug)
+        shell: pwsh
+        run: |
+          $PSVersionTable
+          Write-Host "Runner labels:" (Get-Content $env:RUNNER_TRACKING_ID -ErrorAction SilentlyContinue)
+          Write-Host "Working dir:" (Get-Location)
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: "3.12"
+
       - name: Install deps
+        shell: pwsh
         run: |
-          pip install -r requirements.txt || true
+          pip install -U pip
+          if (Test-Path requirements.txt) { pip install -r requirements.txt }
           pip install pytest requests
-      - name: Generate tests via Ollama
+
+      # ---- Health check: is Ollama up? ----
+      - name: Verify Ollama is running
+        shell: pwsh
+        run: |
+          try {
+            $resp = Invoke-WebRequest -UseBasicParsing -Uri http://localhost:11434/api/tags -Method GET -TimeoutSec 5
+            Write-Host "Ollama tags response length:" $resp.Content.Length
+          } catch {
+            Write-Error "Ollama is not reachable at http://localhost:11434. Start it with 'ollama serve' on this runner."
+            exit 1
+          }
+
+      - name: Generate tests with Ollama
+        shell: pwsh
         env:
+          BOT: ollama
           LLM_URL: http://localhost:11434/api/generate
           LLM_MODEL: llama3
           SRC_PATH: app.py
           TEST_PATH: tests/test_app_generated.py
         run: |
           python src/github_test_coverage.py
+
       - name: Run pytest
-        run: pytest -q tests/
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}   # ensure repo root on path
+        run: |
+          pytest -q tests/
+          
+      # Optional: upload generated tests as artifact
+      - name: Upload generated tests
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-generated-tests
+          path: tests/test_app_generated.py
