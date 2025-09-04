@@ -8,65 +8,66 @@ on:
 
 jobs:
   ai_review:
-    # Your Windows box
-    runs-on: self-hosted
+    # Your Colab runner registers with these labels
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Show runner info (debug)
-        shell: pwsh
-        run: |
-          $PSVersionTable
-          Write-Host "Runner labels:" (Get-Content $env:RUNNER_TRACKING_ID -ErrorAction SilentlyContinue)
-          Write-Host "Working dir:" (Get-Location)
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.12"
 
-      - name: Install deps
-        shell: pwsh
+      - name: Install dependencies
+        shell: bash
         run: |
-          pip install -U pip
-          if (Test-Path requirements.txt) { pip install -r requirements.txt }
+          python -m pip install -U pip
+          [ -f requirements.txt ] && pip install -r requirements.txt || true
           pip install pytest requests
 
-      # ---- Health check: is Ollama up? ----
+      # Health check to ensure Ollama in Colab is reachable
       - name: Verify Ollama is running
-        shell: pwsh
+        shell: bash
         run: |
-          try {
-            $resp = Invoke-WebRequest -UseBasicParsing -Uri http://localhost:11434/api/tags -Method GET -TimeoutSec 5
-            Write-Host "Ollama tags response length:" $resp.Content.Length
-          } catch {
-            Write-Error "Ollama is not reachable at http://localhost:11434. Start it with 'ollama serve' on this runner."
-            exit 1
+          curl -sf http://127.0.0.1:11434/api/tags >/dev/null || {
+            echo "❌ Ollama is not reachable at http://127.0.0.1:11434";
+            echo "Start it in Colab with:  ollama serve  (and pull model: ollama pull mistral:7b)";
+            exit 1;
           }
 
-      - name: Generate tests with Ollama
-        shell: pwsh
+      - name: Generate tests with Ollama (mistral:7b)
+        shell: bash
         env:
           BOT: ollama
-          LLM_URL: http://localhost:11434/api/generate
-          LLM_MODEL: llama3
+          LLM_URL: http://127.0.0.1:11434/api/generate   # <- matches your script
+          LLM_MODEL: mistral:7b                           # <- your model
           SRC_PATH: app.py
           TEST_PATH: tests/test_app_generated.py
         run: |
-          python src/github_test_coverage.py
+          echo "PWD: $(pwd)"
+          ls -la
+          python src_github_test_coverage.py
 
-      - name: Run pytest
-        shell: pwsh
+      - name: Debug: show generated file
+        shell: bash
+        run: |
+          echo "==== repo tree (depth 3) ===="
+          find . -maxdepth 3 -type f | sort
+          test -f tests/test_app_generated.py || { echo "❌ tests/test_app_generated.py not found"; exit 1; }
+          echo "==== tests/test_app_generated.py (head) ===="
+          sed -n '1,120p' tests/test_app_generated.py
+
+      - name: Run Pytest
+        shell: bash
         env:
-          PYTHONPATH: ${{ github.workspace }}   # ensure repo root on path
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           pytest -q tests/
-          
-      # Optional: upload generated tests as artifact
-      - name: Upload generated tests
+
+      - name: Upload generated tests (artifact)
         if: always()
         uses: actions/upload-artifact@v4
         with:
