@@ -8,7 +8,6 @@ on:
 
 jobs:
   ai_review:
-    # Your Colab runner registers with these labels
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
 
@@ -24,15 +23,16 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: |
+          set -euxo pipefail
           python -m pip install -U pip
           [ -f requirements.txt ] && pip install -r requirements.txt || true
           [ -f src/requirements.txt ] && pip install -r src/requirements.txt || true
           pip install pytest requests
 
-      # Safety checks before generation
       - name: Verify repo layout
         shell: bash
         run: |
+          set -e
           test -f app.py || { echo "❌ app.py is missing at repo root"; exit 1; }
           test -f src/github_test_coverage.py || { echo "❌ src/github_test_coverage.py is missing"; exit 1; }
           echo "✅ Found app.py and generator script"
@@ -40,6 +40,7 @@ jobs:
       - name: Verify Ollama is running (Colab)
         shell: bash
         run: |
+          set -e
           curl -sf http://127.0.0.1:11434/api/tags >/dev/null || {
             echo "❌ Ollama not reachable at http://127.0.0.1:11434";
             echo "Start it in Colab:  ollama serve  &   and pull model:  ollama pull mistral:7b";
@@ -50,29 +51,44 @@ jobs:
       - name: Generate tests with Ollama
         shell: bash
         env:
-          # Generator configuration
           SRC_PATH: app.py
           TEST_PATH: tests/test_app_generated.py
           LLM_URL: http://127.0.0.1:11434/api/generate
           LLM_MODEL: mistral:7b
         run: |
+          set -euxo pipefail
           echo "PWD: $(pwd)"
           python src/github_test_coverage.py
 
-      - name: Debug: show generated file
+      # 🔍 Hard validation so we don't hit "no tests ran"
+      - name: Validate generated tests
         shell: bash
         run: |
-          echo "==== repo tree (depth 3) ===="
-          find . -maxdepth 3 -type f | sort
-          test -f tests/test_app_generated.py || { echo "❌ tests/test_app_generated.py not found"; exit 1; }
+          set -e
+          if [ ! -f tests/test_app_generated.py ]; then
+            echo "❌ tests/test_app_generated.py not found"
+            exit 1
+          fi
           echo "==== tests/test_app_generated.py (head) ===="
           sed -n '1,120p' tests/test_app_generated.py
+          # require at least one test function
+          grep -Eq '^[[:space:]]*def[[:space:]]+test_' tests/test_app_generated.py || {
+            echo "❌ Generated file contains no test functions (def test_...)."
+            exit 1
+          }
+          # require it to import app
+          grep -Eiq '^(from[[:space:]]+app[[:space:]]+import|import[[:space:]]+app)' tests/test_app_generated.py || {
+            echo "❌ Generated file does not import app.py."
+            exit 1
+          }
+          echo "✅ Generated tests look valid"
 
       - name: Run Pytest
         shell: bash
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
+          set -euxo pipefail
           pytest -q tests/
 
       - name: Upload generated tests (artifact)
