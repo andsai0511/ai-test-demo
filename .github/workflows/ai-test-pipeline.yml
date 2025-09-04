@@ -1,0 +1,31 @@
+# .github/workflows/ai-test-pipeline.yml
+name: AI Test Coverage Pipeline
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  ai_review:
+    runs-on: self-hosted
+    labels: [colab]   # <— ensures it lands on your Colab VM
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt || true
+          pip install pytest requests
+      - name: Generate tests via Ollama
+        env:
+          LLM_URL: http://localhost:11434/api/generate
+          LLM_MODEL: llama3
+          SRC_PATH: app.py
+          TEST_PATH: tests/test_app_generated.py
+        run: |
+          python src/github_test_coverage.py
+      - name: Run pytest
+        run: pytest -q tests/
