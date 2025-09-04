@@ -26,30 +26,38 @@ jobs:
         run: |
           python -m pip install -U pip
           [ -f requirements.txt ] && pip install -r requirements.txt || true
+          [ -f src/requirements.txt ] && pip install -r src/requirements.txt || true
           pip install pytest requests
 
-      # Health check to ensure Ollama in Colab is reachable
-      - name: Verify Ollama is running
+      # Safety checks before generation
+      - name: Verify repo layout
+        shell: bash
+        run: |
+          test -f app.py || { echo "❌ app.py is missing at repo root"; exit 1; }
+          test -f src/github_test_coverage.py || { echo "❌ src/github_test_coverage.py is missing"; exit 1; }
+          echo "✅ Found app.py and generator script"
+
+      - name: Verify Ollama is running (Colab)
         shell: bash
         run: |
           curl -sf http://127.0.0.1:11434/api/tags >/dev/null || {
-            echo "❌ Ollama is not reachable at http://127.0.0.1:11434";
-            echo "Start it in Colab with:  ollama serve  (and pull model: ollama pull mistral:7b)";
+            echo "❌ Ollama not reachable at http://127.0.0.1:11434";
+            echo "Start it in Colab:  ollama serve  &   and pull model:  ollama pull mistral:7b";
             exit 1;
           }
+          echo "✅ Ollama is reachable"
 
-      - name: Generate tests with Ollama (mistral:7b)
+      - name: Generate tests with Ollama
         shell: bash
         env:
-          BOT: ollama
-          LLM_URL: http://127.0.0.1:11434/api/generate   # <- matches your script
-          LLM_MODEL: mistral:7b                           # <- your model
+          # Generator configuration
           SRC_PATH: app.py
           TEST_PATH: tests/test_app_generated.py
+          LLM_URL: http://127.0.0.1:11434/api/generate
+          LLM_MODEL: mistral:7b
         run: |
           echo "PWD: $(pwd)"
-          ls -la
-          python src_github_test_coverage.py
+          python src/github_test_coverage.py
 
       - name: Debug: show generated file
         shell: bash
